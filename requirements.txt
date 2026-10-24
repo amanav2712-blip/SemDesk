@@ -1,0 +1,7 @@
+streamlit
+streamlit-authenticator
+bcrypt
+mysql-connector-python
+pandas
+plotly
+scipy
