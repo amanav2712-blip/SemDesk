@@ -3,7 +3,7 @@ import streamlit as st
 
 DB_USER = "avnadmin"
 DB_PASS = st.secrets["DB_PASS"]
-DB_HOST = "semdesk-db-vulcan-4ede.a.aivencloud.com"
+DB_HOST = st.secrets["DB_HOST"]
 DB_PORT = 21199
 DB_NAME = "defaultdb"
 
