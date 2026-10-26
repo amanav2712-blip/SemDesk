@@ -5,4 +5,4 @@ mysql-connector-python
 pandas
 plotly
 scipy
-streamlit-calendar==0.6.1
+streamlit-calendar
