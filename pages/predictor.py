@@ -1,3 +1,4 @@
+from scipy.special import _spherical_bessel
 import streamlit as st
 import numpy as np
 import scipy.stats as stats
@@ -22,21 +23,20 @@ st.markdown("Enter exam statistics for each course to calculate percentiles, pre
 conn = database.get_connection()
 cursor = conn.cursor(dictionary=True)
 
-# Grade mapping helper: A, A-, B, B-, C, C-, D, F (10-point scale)
-def get_letter_grade(z):
-    if z >= 1.5:
+def get_letter_grade(percentile):
+    if percentile >= 90:
         return "A", 10, "green"
-    elif z >= 1.0:
+    elif percentile >= 75:
         return "A-", 9, "lightgreen"
-    elif z >= 0.5:
+    elif percentile >= 60:
         return "B", 8, "#3B82F6"
-    elif z >= 0.0:
+    elif percentile >= 45:
         return "B-", 7, "#0284C7"
-    elif z >= -0.5:
+    elif percentile >= 30:
         return "C", 6, "#D97706"
-    elif z >= -1.0:
+    elif percentile >= 15:
         return "C-", 5, "#EA580C"
-    elif z >= -1.5:
+    elif percentile >= 5:
         return "D", 4, "#E11D48"
     else:
         return "F", 0, "#DC2626"
@@ -95,7 +95,10 @@ for c in all_courses:
         sd = float(g["std_dev"])
         mx = float(g.get("max_marks") or 100.0)
         z = (mm - ca) / sd if sd > 0 else 0.0
-        grd, pts, clr = get_letter_grade(z)
+        a = (0.0 - ca) / sd
+        b = (mx - ca) / sd
+        percentile = stats.truncnorm.cdf(mm, a, b, loc=ca, scale=sd) * 100
+        grd, pts, clr = get_letter_grade(percentile)
         all_saved_records.append({
             "Course": cid,
             "Name": c["name"],
@@ -103,6 +106,7 @@ for c in all_courses:
             "Score": f"{mm:g} / {mx:g}",
             "Class Mean": f"{ca:g}",
             "Z-Score": f"{z:.2f}",
+            "Percentile": f"{percentile:.2f}%ile",
             "Predicted Grade": grd,
             "Grade Points": pts,
             "Weighted Points": pts * cr
@@ -147,7 +151,7 @@ if all_saved:
             "Credits": f"{r['Credits']:g}",
             "Score": r["Score"],
             "Class Mean": r["Class Mean"],
-            "Z-Score": r["Z-Score"],
+            "Percentile": r["Percentile"],
             "Predicted Grade": r["Predicted Grade"],
             "Grade Points": r["Grade Points"]
         } for r in all_saved_records
@@ -209,7 +213,7 @@ if saved_data:
     percentile = stats.truncnorm.cdf(mm, a, b, loc=ca, scale=sd) * 100
     z_score = (mm - ca) / sd
 
-    pred_grade, pts, color = get_letter_grade(z_score)
+    pred_grade, pts, color = get_letter_grade(percentile)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Your Z-Score", f"{z_score:.2f}")
