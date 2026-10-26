@@ -1,97 +1,115 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from datetime import date
+import datetime
 import sys
 import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import database
+import importlib
+importlib.reload(database)
 
 if not st.session_state.get("authentication_status"):
-    st.warning("Please log in on the Home page to view this module.")
+    st.warning("Please log in on the Home page first.")
     st.stop()
 
 active_user = st.session_state["username"]
 
-st.set_page_config(page_title="Attendance", layout="wide")
-st.title("Smart Attendance Tracker")
+st.set_page_config(page_title="Attendance Analytics", layout="wide")
+st.title("Attendance Analytics & Tracker")
+
+data = database.get_attendance_data(active_user)
+stats = data["stats"]
+
+if not stats:
+    st.info("No courses found. Add courses and timetable in the **Timetable** tab to see your attendance analytics.")
+    st.stop()
+
+selected_course = st.selectbox("Select Course", list(stats.keys()))
+c_stat = stats[selected_course]
+
+st.divider()
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Classes Held So Far", c_stat["held"])
+col2.metric("Classes Attended", c_stat["attended"])
+
+pct_color = "normal" if c_stat["pct"] >= c_stat["target"] else "inverse"
+col3.metric("Current Attendance", f"{c_stat['pct']:.1f}%", f"Target: {c_stat['target']:.0f}%", delta_color=pct_color)
+
+if c_stat["pct"] >= c_stat["target"]:
+    col4.metric("Safe to Skip", f"{c_stat['safe_to_skip']} classes", delta="Buffer available", delta_color="normal")
+else:
+    col4.metric("Must Attend Next", f"{c_stat['must_attend']} classes", delta="Danger Zone", delta_color="inverse")
+
+# Progress bar
+st.write(f"**Attendance Progress vs Cutoff ({c_stat['target']:.0f}%)**")
+st.progress(min(1.0, max(0.0, c_stat["pct"] / 100.0)))
+
+st.divider()
+
+col_l, col_r = st.columns([1, 1])
 
 conn = database.get_connection()
 cursor = conn.cursor(dictionary=True)
 
-cursor.execute("SELECT id, target_attendance FROM courses WHERE username = %s", (active_user,))
-courses_data = cursor.fetchall()
+with col_l:
+    st.subheader(f"Log a Bunk for {selected_course}")
+    st.caption("Classes are automatically counted as Present. Record missed classes below:")
 
-if not courses_data:
-    st.warning("Add courses in the Timetable tab first.")
-else:
-    course_dict = {str(row['id']): float(row['target_attendance']) for row in courses_data} # type: ignore
-    selected_course = st.selectbox("Select Course to Manage", list(course_dict.keys()))
-    target_pct = course_dict[selected_course]
+    bunk_d = st.date_input("Date Missed", value=datetime.date.today(), format="DD/MM/YYYY", key="att_bunk_d")
+    bunk_weekday = bunk_d.strftime("%A")
+    day_slots = [s for s in data["slots"] if s["course_id"] == selected_course and s["day_of_week"] == bunk_weekday]
 
-    with st.expander("Log Today's Class", expanded=True):
-        with st.form("attendance_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                class_date = st.date_input("Date", value=date.today())
-            with col2:
-                status = st.selectbox("Status", ["Present", "Absent", "Cancelled"])
-
-            if st.form_submit_button("Log Attendance"):
-                if status != "Cancelled":
-                    sql = "INSERT INTO attendance (username, course_id, class_date, status) VALUES (%s, %s, %s, %s)"
-                    cursor.execute(sql, (active_user, selected_course, class_date, str(status)))
-                    conn.commit()
-                    st.success("Logged successfully!")
-                    st.rerun()
-
-    cursor.execute("SELECT class_date, status FROM attendance WHERE course_id = %s AND username = %s ORDER BY class_date ASC", (selected_course, active_user))
-    records = cursor.fetchall()
-
-    if records:
-        df = pd.DataFrame(records)
-
-        total_classes = len(df)
-        present_classes = len(df[df['status'] == 'Present'])
-        current_pct = (present_classes / total_classes) * 100
-
-        classes_to_target = (present_classes / (target_pct / 100)) - total_classes
-
-        st.divider()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Classes", total_classes)
-        c2.metric("Classes Attended", present_classes)
-
-        pct_color = "normal" if current_pct >= target_pct else "inverse"
-        c3.metric("Current Attendance", f"{current_pct:.1f}%", delta=f"{current_pct - target_pct:.1f}% from Target", delta_color=pct_color)
-
-        if classes_to_target >= 1:
-            c4.metric("Safe to Skip", f"{int(classes_to_target)} classes", delta="You have a buffer", delta_color="normal")
-        elif classes_to_target < 0:
-            needed = abs(int(classes_to_target)) + 1
-            c4.metric("Must Attend Next", f"{needed} classes", delta="Danger Zone", delta_color="inverse")
-        else:
-            c4.metric("Safe to Skip", "0 classes", delta="On the edge", delta_color="off")
-
-        st.subheader("Attendance Trend")
-
-        df['is_present'] = df['status'].apply(lambda x: 1 if x == 'Present' else 0)
-        df['cumulative_present'] = df['is_present'].cumsum()
-        df['cumulative_total'] = range(1, len(df) + 1)
-        df['cumulative_pct'] = (df['cumulative_present'] / df['cumulative_total']) * 100
-
-        fig = px.line(df, x='class_date', y='cumulative_pct', markers=True,
-                      labels={'class_date': 'Date', 'cumulative_pct': 'Attendance %'})
-
-        fig.add_hline(y=target_pct, line_dash="dash", line_color="red",
-                      annotation_text=f"Cutoff ({target_pct}%)", annotation_position="bottom right")
-
-        fig.update_layout(yaxis_range=[0, 105])
-        st.plotly_chart(fig, use_container_width=True)
-
+    if day_slots:
+        slot_labels = [f"{database.format_time_str(s['start_time'])} - {database.format_time_str(s['end_time'])}" for s in day_slots]
+        chosen_idx = st.selectbox("Class Time Slot", range(len(day_slots)), format_func=lambda i: slot_labels[i], key="att_bunk_slot")
+        bunk_time = day_slots[chosen_idx]["start_time"]
     else:
-        st.info("No attendance logged for this course yet.")
+        bunk_time = st.time_input("Class Start Time", value=datetime.time(9, 0), key="att_bunk_time")
+        st.caption(f"No regular timetable slots for {selected_course} on {bunk_weekday}.")
+
+    if st.button("Record Bunk", key="att_record_bunk"):
+        cursor.execute(
+            "INSERT INTO absences (username, course_id, absence_date, start_time) VALUES (%s, %s, %s, %s)",
+            (active_user, selected_course, bunk_d, bunk_time)
+        )
+        conn.commit()
+        time_disp = database.format_time_str(bunk_time)
+        st.success(f"Recorded bunk for {selected_course} ({time_disp}) on {bunk_d.strftime('%d/%m/%y')}")
+        st.rerun()
+
+with col_r:
+    st.subheader("Logged Bunks History")
+    course_bunks = [b for b in data["absences"] if b["course_id"] == selected_course]
+    if course_bunks:
+        for b in course_bunks:
+            b_col1, b_col2 = st.columns([3, 1])
+            b_date_str = b['absence_date'].strftime('%d/%m/%y') if hasattr(b['absence_date'], 'strftime') else str(b['absence_date'])
+            time_disp = f" at {database.format_time_str(b['start_time'])}" if b.get('start_time') else ""
+            b_col1.write(f"• Missed on **{b_date_str}**{time_disp}")
+            if b_col2.button("Undo", key=f"att_undo_{b['id']}"):
+                cursor.execute("DELETE FROM absences WHERE id = %s AND username = %s", (b['id'], active_user))
+                conn.commit()
+                st.rerun()
+    else:
+        st.success("No bunks recorded for this course! 100% attendance maintained.")
+
+st.divider()
+st.subheader("All Courses Overview")
+overview_rows = []
+for cid, s in stats.items():
+    overview_rows.append({
+        "Course Code": cid,
+        "Course Name": s["name"],
+        "Held": s["held"],
+        "Attended": s["attended"],
+        "Bunks": s["bunks"],
+        "Attendance %": f"{s['pct']:.1f}%",
+        "Target %": f"{s['target']:.0f}%",
+        "Status": f"Safe to skip {s['safe_to_skip']}" if s["pct"] >= s["target"] else f"Must attend {s['must_attend']}"
+    })
+st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
 
 cursor.close()
 conn.close()
