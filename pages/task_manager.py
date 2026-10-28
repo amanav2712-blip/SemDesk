@@ -33,7 +33,7 @@ with st.expander("➕ Add a New Task", expanded=True):
 
             with col1:
                 task_course = st.selectbox("Course", available_courses)
-                task_title = st.text_input("Task Description (e.g., Assignment 1)")
+                task_title = st.text_input("Task Description")
             with col2:
                 task_deadline = st.date_input("Deadline Date", min_value=date.today(), format="DD/MM/YYYY")
                 task_deadline_time = st.time_input("Deadline Time", value=datetime.time(23, 59))

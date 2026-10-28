@@ -27,8 +27,8 @@ with tab_courses:
         with st.form("add_course_form", clear_on_submit=True):
             col1, col2, col3 = st.columns(3)
             with col1:
-                course_id = st.text_input("Course Code (e.g. CS101)").strip().upper()
-                course_name = st.text_input("Course Name (e.g. Data Structures)")
+                course_id = st.text_input("Course Code").strip().upper()
+                course_name = st.text_input("Course Name")
             with col2:
                 course_credits = st.number_input("Credits", min_value=0.0, max_value=20.0, value=0.0, step=1.0)
             with col3:
